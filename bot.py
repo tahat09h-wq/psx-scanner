@@ -5,69 +5,74 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-def fetch_psx_data(symbol: str):
-    try:
-        url = f"https://dps.psx.com.pk/times/1"  # Live tickers feed from PSX
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # Search for symbol in the ticker list
-            for item in data:
-                if item.get("code", "").upper() == symbol.upper():
-                    return item
-        
-        # Backup API attempt
-        url_alt = f"https://dps.psx.com.pk/stock/{symbol.upper()}"
-        res_alt = requests.get(url_alt, headers=headers, timeout=10)
-        if res_alt.status_code == 200:
-            return res_alt.json()
+def fetch_investify_data(symbol: str):
+    symbol = symbol.strip().upper()
+    
+    # Investify Web/API Headers
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': f'https://www.investify.pk/stocks/{symbol.lower()}',
+        'Accept': 'application/json, text/plain, */*'
+    }
+    
+    # Try searching / fetching via Investify backend endpoints
+    endpoints = [
+        f"https://www.investify.pk/api/stocks/{symbol}",
+        f"https://www.investify.pk/api/search?q={symbol}",
+        f"https://www.investify.pk/stocks/{symbol}"
+    ]
+    
+    for url in endpoints:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                if "application/json" in response.headers.get("Content-Type", ""):
+                    data = response.json()
+                    if data:
+                        return data
+        except Exception as e:
+            print(f"Error fetching from {url}: {e}")
             
-        return None
-    except Exception as e:
-        print(f"Error fetching data: {e}")
-        return None
+    return None
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text.strip()
     
-    # Financial Filter
     financial_keywords = [
-        "sys", "ogdc", "ffc", "hubc", "luck", "cnergy", "ubl", "mebl",
-        "stock", "psx", "market", "price", "share", "dividend", "trading", 
-        "crypto", "forex", "gold", "xauusd"
+        "sys", "ogdc", "ffc", "hubc", "luck", "cnergy", "ubl", "mebl", "kel", 
+        "stock", "psx", "market", "price", "share", "dividend", "trading"
     ]
     
     is_financial = any(kw in user_text.lower() for kw in financial_keywords) or len(user_text) <= 6
     
     if not is_financial and not user_text.startswith("/"):
-        await update.message.reply_text(
-            "❌ Sorry, I am strictly a financial and PSX market assistant."
-        )
+        await update.message.reply_text("❌ Sorry, I am strictly a financial and PSX market assistant.")
         return
 
-    symbol = user_text.upper().replace("TELL ME ABOUT ", "").strip()
-    await update.message.reply_text(f"🔍 Fetching live data for {symbol} from PSX...")
+    symbol = user_text.upper().strip()
+    await update.message.reply_text(f"🔍 Fetching live data for {symbol} from Investify...")
     
-    data = fetch_psx_data(symbol)
+    data = fetch_investify_data(symbol)
     
     if data:
-        # Extract fields safely
-        code = data.get("code", symbol)
-        price = data.get("price") or data.get("current") or "N/A"
-        change = data.get("change") or "0.00"
+        # Extract fields flexibly based on API return schema
+        code = data.get("symbol") or data.get("code") or symbol
+        price = data.get("current") or data.get("price") or data.get("last_price") or "N/A"
+        change = data.get("change") or data.get("price_change") or "0.00"
         volume = data.get("volume") or "N/A"
         
         response_msg = (
-            f"📊 *PSX Stock Report: {code}*\n\n"
-            f"💰 *Price:* PKR {price}\n"
+            f"📊 *Investify PSX Report: {code}*\n\n"
+            f"💰 *Current Price:* PKR {price}\n"
             f"📈 *Change:* {change}\n"
             f"🔄 *Volume:* {volume}\n\n"
-            f"✅ *Source:* Official PSX Data Feed"
+            f"✅ *Source:* Investify Live Feed"
         )
     else:
-        response_msg = f"⚠️ Symbol `{symbol}` not found or API limits reached. Please verify ticker symbol (e.g., OGDC, SYS, CNERGY)."
+        response_msg = (
+            f"⚠️ Symbol `{symbol}` not found on Investify.\n"
+            f"Please verify the ticker symbol (e.g., OGDC, SYS, CNERGY, KEL)."
+        )
         
     await update.message.reply_text(response_msg, parse_mode="Markdown")
 

@@ -5,46 +5,36 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-def fetch_psx_market_data(symbol: str):
+def fetch_psx_data(symbol: str):
     symbol = symbol.strip().upper()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*'
     }
     
-    # Official PSX list/times feed endpoints containing all market tickers simultaneously
-    endpoints = [
-        "https://dps.psx.com.pk/times/1",
-        "https://dps.psx.com.pk/live/list",
-        "https://dps.psx.com.pk/symbols"
-    ]
-    
-    for url in endpoints:
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                items = data.get("data", data) if isinstance(data, dict) else data
-                
-                if isinstance(items, list):
-                    for item in items:
-                        item_symbol = str(item.get("symbol") or item.get("code") or item.get("ticker") or "").upper()
-                        if symbol == item_symbol:
-                            return item
-                elif isinstance(items, dict):
-                    if symbol in items:
-                        return items[symbol]
-        except Exception as e:
-            print(f"Endpoint error ({url}): {e}")
-            
-    # Fallback lookup directly via stock summary
+    # Official PSX times feed endpoint
+    try:
+        url = "https://dps.psx.com.pk/times/1"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get("data", data) if isinstance(data, dict) else data
+            if isinstance(items, list):
+                for item in items:
+                    item_symbol = str(item.get("symbol") or item.get("code") or "").upper()
+                    if symbol == item_symbol:
+                        return item
+    except Exception as e:
+        print(f"Times API Error: {e}")
+
+    # Fallback to direct stock endpoint
     try:
         url = f"https://dps.psx.com.pk/stock/{symbol}"
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            return res.json()
-    except Exception:
-        pass
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"Stock API Error: {e}")
 
     return None
 
@@ -65,7 +55,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = user_text.upper().strip()
     await update.message.reply_text(f"🔍 Fetching live data for {symbol}...")
     
-    data = fetch_psx_market_data(symbol)
+    data = fetch_psx_data(symbol)
     
     if data:
         stats = data.get("stats", {}) if isinstance(data.get("stats"), dict) else {}
@@ -83,8 +73,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         response_msg = (
-            f"⚠️ Symbol `{symbol}` data unavailable.\n"
-            f"Make sure to use correct ticker symbols like `OGDC`, `SYS`, `KEL`, `FFC`."
+            f"⚠️ Symbol `{symbol}` data currently unavailable.\n"
+            f"(Note: Market may be closed or IP restricted)."
         )
         
     await update.message.reply_text(response_msg, parse_mode="Markdown")
@@ -98,7 +88,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("🤖 GridPulse Bot Active...")
-    app.run_polling()
+    # drop_pending_updates=True clears old conflict sessions instantly
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
